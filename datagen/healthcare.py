@@ -56,6 +56,9 @@ class HealthcareGenerator:
             'oxygen_saturation': (95, 100)
         }
         
+        self.last_params = None
+        self.data = None
+        
     def _generate_vitals(self) -> Dict[str, float]:
         """Generate a set of vital signs."""
         vitals = {}
@@ -232,3 +235,25 @@ class HealthcareGenerator:
         df = pd.DataFrame(data)
         df['results'] = df['results'].apply(json.dumps)
         return df.sort_values('collection_date')
+        
+    def generate(self, num_records: int = 100, include_vitals: bool = True) -> pd.DataFrame:
+        """Generate synthetic healthcare data."""
+        
+        # Store generation parameters
+        self.last_params = {
+            'num_records': num_records,
+            'include_vitals': include_vitals
+        }
+        
+        # Generate data
+        data = self._generate_data(num_records, include_vitals)
+        
+        # Store the generated data
+        self.data = data
+        
+        return data
+
+    def _save_impl(self, filename: str, directory: str, **kwargs) -> None:
+        """Save healthcare data to CSV."""
+        self.data.to_csv(f"{directory}/{filename}.csv", index=False)
+        print(f"Data saved to {directory}/{filename}.csv")

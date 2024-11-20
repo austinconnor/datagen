@@ -157,3 +157,34 @@ class TextDataGenerator:
             data.append(log_entry)
             
         return pd.DataFrame(data).sort_values('timestamp')
+
+    def generate(self, num_samples: int = 100, text_type: str = 'article') -> pd.DataFrame:
+        """Generate synthetic text data."""
+        
+        # Store generation parameters
+        self.last_params = {
+            'num_samples': num_samples,
+            'text_type': text_type
+        }
+        
+        # Generate data
+        if text_type == 'user_profiles':
+            data = self.generate_user_profiles(num_samples)
+        elif text_type == 'company_data':
+            data = self.generate_company_data(num_samples)
+        elif text_type == 'articles':
+            data = self.generate_articles(num_samples)
+        elif text_type == 'log_entries':
+            data = self.generate_log_entries(num_samples)
+        else:
+            raise ValueError("Invalid text type")
+        
+        # Store the generated data
+        self.data = data
+        
+        return data
+
+    def save(self, filename: str, directory: str) -> None:
+        """Save text data to CSV."""
+        self.data.to_csv(f"{directory}/{filename}.csv", index=False)
+        print(f"Data saved to {directory}/{filename}.csv")

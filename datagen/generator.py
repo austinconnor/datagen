@@ -4,7 +4,50 @@ from faker import Faker
 import re
 from typing import Dict, Optional, Union
 
-class DataGenerator:
+class Generator:
+    """Base class for all data generators."""
+    
+    def __init__(self):
+        """Initialize the generator."""
+        self.data = None
+        self.last_params = {}
+    
+    def generate(self, *args, **kwargs):
+        """Generate data with the given parameters."""
+        raise NotImplementedError("Subclasses must implement generate()")
+    
+    def save(self, filename: str, directory: str = "output", **kwargs) -> None:
+        """Save the most recently generated data to a file.
+        
+        Args:
+            filename: Name of the file (without extension)
+            directory: Directory to save the file in (default: "output")
+            **kwargs: Additional arguments for specific file formats
+        
+        Raises:
+            ValueError: If no data has been generated yet
+        """
+        if self.data is None:
+            raise ValueError("No data has been generated yet. Call generate() first.")
+        
+        # Create the output directory if it doesn't exist
+        import os
+        os.makedirs(directory, exist_ok=True)
+        
+        # Let subclasses implement their specific save logic
+        self._save_impl(filename, directory, **kwargs)
+    
+    def _save_impl(self, filename: str, directory: str, **kwargs) -> None:
+        """Implementation of save logic for specific data types.
+        
+        Args:
+            filename: Name of the file (without extension)
+            directory: Directory to save the file in
+            **kwargs: Additional arguments for specific file formats
+        """
+        raise NotImplementedError("Subclasses must implement _save_impl()")
+
+class DataGenerator(Generator):
     """A class for generating synthetic tabular data."""
     
     def __init__(self, example_data: Optional[pd.DataFrame] = None):
@@ -14,6 +57,7 @@ class DataGenerator:
         Args:
             example_data: Optional DataFrame to use as a template for generating similar data
         """
+        super().__init__()
         self.faker = Faker()
         self.example_data = example_data
         
@@ -67,7 +111,8 @@ class DataGenerator:
             data = {}
             for col_name, dtype in schema.items():
                 data[col_name] = self._generate_column(dtype, rows)
-            return pd.DataFrame(data)
+            self.data = pd.DataFrame(data)
+            return self.data
             
         else:
             # Generate data similar to example_data
@@ -81,4 +126,9 @@ class DataGenerator:
                 else:
                     # For non-numeric columns, sample from existing values
                     data[col] = pd.Series(np.random.choice(self.example_data[col], size=rows))
-            return pd.DataFrame(data)
+            self.data = pd.DataFrame(data)
+            return self.data
+
+    def _save_impl(self, filename: str, directory: str, **kwargs) -> None:
+        """Implementation of save logic for DataFrames."""
+        self.data.to_csv(f"{directory}/{filename}.csv", index=False)
