@@ -1,81 +1,48 @@
-from datagen import OHLCVGenerator
-import pandas as pd
-from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
-
-def plot_ohlc(df: pd.DataFrame, title: str):
-    """Plot OHLC data with volume."""
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), height_ratios=[3, 1], sharex=True)
-    
-    # Plot OHLC
-    df['close'].plot(ax=ax1, label='Close', color='black', alpha=0.7)
-    ax1.fill_between(df.index.get_level_values(0), df['low'], df['high'], alpha=0.3, color='gray')
-    ax1.set_title(title)
-    ax1.set_ylabel('Price')
-    ax1.grid(True)
-    
-    # Plot volume
-    ax2.bar(df.index.get_level_values(0), df['volume'], alpha=0.5, color='blue')
-    ax2.set_ylabel('Volume')
-    ax2.grid(True)
-    
-    plt.tight_layout()
-    return fig
+from datagen.financial import OHLCVGenerator, MarketRegime, AssetClass, MarketHours
 
 def main():
-    # Example 1: Generate daily data for one stock
-    generator = OHLCVGenerator(
-        volatility=0.02,  # 2% daily volatility
-        drift=0.0001,     # slight upward trend
-        volume_mean=1000000
-    )
-    
-    daily_data = generator.generate(
-        periods=252,  # One trading year
-        start_date='2023-01-01',
-        start_price=100.0,
-        symbol='AAPL'
-    )
-    
-    print("\nGenerated daily OHLCV data:")
-    print(daily_data.head())
-    
-    # Plot daily data
-    fig1 = plot_ohlc(daily_data, 'Daily OHLCV Data - AAPL')
-    
-    # Example 2: Generate hourly data for multiple stocks
-    # Create generators with different characteristics
-    generators = {
-        'TECH': OHLCVGenerator(volatility=0.015, drift=0.0002),  # Growth stock
-        'UTIL': OHLCVGenerator(volatility=0.008, drift=0.0001),  # Stable stock
-        'SPEC': OHLCVGenerator(volatility=0.03, drift=-0.0001)   # Volatile stock
+    # Example configurations
+    regimes = {
+        'bull': MarketRegime.BULL,
+        'bear': MarketRegime.BEAR,
+        'crash': MarketRegime.CRASH,
+        'bubble': MarketRegime.BUBBLE,
+        'recovery': MarketRegime.RECOVERY
     }
     
-    # Generate data for each stock
-    start_date = datetime.now() - timedelta(days=5)
-    hourly_dfs = []
+    timeframes = ['D', 'H', '15min', '5min', '1min']
     
-    for symbol, gen in generators.items():
-        df = gen.generate(
-            periods=24 * 5,  # 5 days of hourly data
-            start_date=start_date,
-            frequency='H',
-            start_price=100.0,
-            symbol=symbol
-        )
-        hourly_dfs.append(df)
+    # Calculate periods for each timeframe to generate roughly a month of data
+    periods = {
+        'D': 30,            # 30 days
+        'H': 30 * 24,       # 30 days of hourly data
+        '15min': 30 * 24 * 4,   # 30 days of 15-min data
+        '5min': 30 * 24 * 12,   # 30 days of 5-min data
+        '1min': 30 * 24 * 60    # 30 days of 1-min data
+    }
     
-    # Combine all stocks
-    hourly_data = pd.concat(hourly_dfs)
-    
-    print("\nGenerated hourly OHLCV data:")
-    print(hourly_data.head())
-    
-    # Plot hourly data for one stock
-    tech_data = hourly_data.xs('TECH', level='symbol')
-    fig2 = plot_ohlc(tech_data, 'Hourly OHLCV Data - TECH Stock')
-    
-    plt.show()
+    # Generate data for each regime and timeframe
+    for regime_name, regime in regimes.items():
+        print(f"\nGenerating {regime_name} market data:")
+        for timeframe in timeframes:
+            # Create generator with minimal parameters
+            gen = OHLCVGenerator(
+                regime=regime,
+                asset_class=AssetClass.STOCK,
+                market_hours=MarketHours.US
+            )
+            
+            # Generate data and save to CSV
+            gen.generate(
+                periods=periods[timeframe],
+                start_date="2024-01-01",
+                start_price=100,
+                frequency=timeframe
+            )
+            
+            # Save using the generator's save method
+            filename = f"{regime_name}_market_{timeframe}".lower().replace('.', '')
+            gen.save_to_csv(filename)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

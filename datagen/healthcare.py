@@ -89,10 +89,12 @@ class HealthcareGenerator:
         
         for _ in range(count):
             birth_date = self.faker.date_of_birth(minimum_age=18, maximum_age=90)
+            first_name = self.faker.first_name()
+            last_name = self.faker.last_name()
             patient = {
                 'patient_id': f"P{str(uuid.uuid4())[:8]}",
-                'first_name': self.faker.first_name(),
-                'last_name': self.faker.last_name(),
+                'first_name': first_name,
+                'last_name': last_name,
                 'birth_date': birth_date,
                 'gender': random.choice(['M', 'F']),
                 'blood_type': random.choice(blood_types),

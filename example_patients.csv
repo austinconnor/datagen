@@ -1,6 +1,0 @@
-patient_id,first_name,last_name,birth_date,gender,blood_type,weight_kg,height_cm,conditions,allergies,emergency_contact
-P21359a49,Angel,Hill,1980-07-24,M,A+,100.6,165,"[{""condition"": ""Asthma"", ""diagnosed_date"": ""2017-02-11"", ""status"": ""Resolved""}]",[],"{""name"": ""Megan Mcclain"", ""relationship"": ""Spouse"", ""phone"": ""296-500-1338""}"
-P6e5be658,Jacqueline,Barnes,1986-02-25,F,A+,47.2,163,"[{""condition"": ""Hypothyroidism"", ""diagnosed_date"": ""2019-05-17"", ""status"": ""Resolved""}]",[],"{""name"": ""Sean Blake"", ""relationship"": ""Parent"", ""phone"": ""(865)342-3511""}"
-P588b12b7,Maurice,Baker,1960-02-02,F,B-,78.7,167,[],"[""Shellfish""]","{""name"": ""Joe Martinez"", ""relationship"": ""Child"", ""phone"": ""(518)349-5931x0341""}"
-P3701e5c3,Shawn,Flowers,1961-08-19,F,B+,61.1,171,[],[],"{""name"": ""Henry Santiago"", ""relationship"": ""Sibling"", ""phone"": ""001-719-228-3276x483""}"
-P1248dc87,Antonio,Stewart,1950-08-09,M,AB-,108.6,188,"[{""condition"": ""Hypertension"", ""diagnosed_date"": ""2017-07-24"", ""status"": ""Resolved""}, {""condition"": ""Migraine"", ""diagnosed_date"": ""2016-12-28"", ""status"": ""Resolved""}]",[],"{""name"": ""Sherri Edwards"", ""relationship"": ""Sibling"", ""phone"": ""+1-876-772-4238x8496""}"
