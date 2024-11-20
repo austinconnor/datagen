@@ -412,7 +412,7 @@ class OHLCVGenerator:
         
         return self.data
 
-    def save_to_csv(self, filename: str, directory: str = "output") -> None:
+    def save(self, filename: str, directory: str = "output") -> None:
         """Save the most recently generated data to a CSV file.
         
         Args:
@@ -436,6 +436,6 @@ class OHLCVGenerator:
         data_to_save.rename(columns={'index': 'datetime'}, inplace=True)
         
         # Save to CSV
-        filepath = os.path.join(directory, f"{filename}.csv")
+        filepath = os.path.join(directory, f"{filename}")
         data_to_save[['datetime', 'open', 'high', 'low', 'close', 'volume']].to_csv(filepath, index=False)
         print(f"Data saved to {filepath}")

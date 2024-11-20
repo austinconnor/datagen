@@ -10,12 +10,13 @@ def main():
         'recovery': MarketRegime.RECOVERY
     }
     
-    timeframes = ['D', 'H', '15min', '5min', '1min']
+    timeframes = ['D', 'H', '30min', '15min', '5min', '1min']
     
     # Calculate periods for each timeframe to generate roughly a month of data
     periods = {
         'D': 30,            # 30 days
         'H': 30 * 24,       # 30 days of hourly data
+        '30min': 30 * 24 * 2,   # 30 days of 30-min data
         '15min': 30 * 24 * 4,   # 30 days of 15-min data
         '5min': 30 * 24 * 12,   # 30 days of 5-min data
         '1min': 30 * 24 * 60    # 30 days of 1-min data
@@ -41,8 +42,8 @@ def main():
             )
             
             # Save using the generator's save method
-            filename = f"{regime_name}_market_{timeframe}".lower().replace('.', '')
-            gen.save_to_csv(filename)
+            filename = f"{regime_name}_market_{timeframe.lower().replace('.', '_')}.csv"
+            gen.save(filename)
 
 if __name__ == "__main__":
     main()
