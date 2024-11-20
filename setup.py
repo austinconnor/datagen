@@ -4,7 +4,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="datagen",
+    name="datagen-python",
     version="0.1.0",
     author="Connor",
     description="A Python utility for generating synthetic data for various domains",
