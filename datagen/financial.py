@@ -3,6 +3,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Union, List, Tuple
 from enum import Enum
+from tqdm import tqdm
 
 class MarketRegime(Enum):
     BULL = 'bull'
@@ -29,65 +30,37 @@ class MarketHours(Enum):
     CRYPTO = 'crypto'  # 24/7
     FOREX = 'forex'    # 24/5
 
-class OHLCVGenerator:
-    """Generator for OHLCV (Open, High, Low, Close, Volume) time series data."""
+class TickGenerator:
+    """Generator for tick-level financial data with realistic microstructure."""
     
     def __init__(self, 
-                 base_volatility: float = 0.02,
-                 base_drift: float = 0.0001,
-                 volume_mean: float = 1000000,
-                 volume_std: float = 500000,
+                 base_volatility: float = 0.002,
+                 base_drift: float = 0.00001,
+                 tick_volume_mean: float = 100,
+                 tick_volume_std: float = 50,
                  regime: MarketRegime = MarketRegime.SIDEWAYS,
                  asset_class: AssetClass = AssetClass.STOCK,
                  market_hours: MarketHours = MarketHours.US,
                  volatility_clustering: float = 0.7,
                  volume_price_corr: float = 0.4,
-                 gap_probability: float = 0.05,
-                 max_gap_size: float = 0.05,
-                 seasonality_amplitude: float = 0.1,
-                 mean_reversion_strength: float = 0.02,  
-                 momentum_factor: float = 0.1,          
-                 jump_intensity: float = 0.01,          
-                 jump_size_mean: float = 0.05,          
-                 jump_size_std: float = 0.02,           
-                 volatility_of_volatility: float = 0.2, 
-                 correlation_decay: float = 0.98,       
-                 bid_ask_spread: float = 0.001,         
-                 tick_size: Optional[float] = None,     
-                 market_impact: float = 0.1,            
-                 intraday_volatility_pattern: Optional[List[float]] = None):
-        """
-        Initialize the OHLCV generator with enhanced parameters.
-        
-        Args:
-            base_volatility: Base daily volatility of the price
-            base_drift: Base daily drift (trend) in the price
-            volume_mean: Mean daily volume
-            volume_std: Standard deviation of daily volume
-            regime: Market regime (bull, bear, sideways, volatile)
-            asset_class: Type of asset to simulate
-            market_hours: Market hours (US, Europe, Asia, Crypto, Forex)
-            volatility_clustering: Persistence of volatility (0 to 1)
-            volume_price_corr: Correlation between volume and absolute price changes
-            gap_probability: Probability of overnight gaps
-            max_gap_size: Maximum size of price gaps
-            seasonality_amplitude: Amplitude of seasonal patterns
-            mean_reversion_strength: Strength of mean reversion
-            momentum_factor: Momentum effect strength
-            jump_intensity: Frequency of price jumps
-            jump_size_mean: Average jump size
-            jump_size_std: Jump size variation
-            volatility_of_volatility: How much volatility itself varies
-            correlation_decay: Autocorrelation decay
-            bid_ask_spread: Bid-ask spread as fraction of price
-            tick_size: Minimum price movement
-            market_impact: Price impact of volume
-            intraday_volatility_pattern: Optional list of 24 hourly volatility multipliers
-        """
+                 gap_probability: float = 0.001,
+                 max_gap_size: float = 0.005,
+                 mean_reversion_strength: float = 0.002,
+                 momentum_factor: float = 0.02,
+                 jump_intensity: float = 0.0005,
+                 jump_size_mean: float = 0.005,
+                 jump_size_std: float = 0.002,
+                 volatility_of_volatility: float = 0.2,
+                 correlation_decay: float = 0.98,
+                 bid_ask_spread: float = 0.0001,
+                 tick_size: Optional[float] = None,
+                 market_impact: float = 0.01,
+                 ticks_per_day: int = 390000):
+        """Initialize the tick generator with market microstructure parameters."""
         self.base_volatility = base_volatility
         self.base_drift = base_drift
-        self.volume_mean = volume_mean
-        self.volume_std = volume_std
+        self.tick_volume_mean = tick_volume_mean
+        self.tick_volume_std = tick_volume_std
         self.regime = regime
         self.asset_class = asset_class
         self.market_hours = market_hours
@@ -95,7 +68,6 @@ class OHLCVGenerator:
         self.volume_price_corr = volume_price_corr
         self.gap_probability = gap_probability
         self.max_gap_size = max_gap_size
-        self.seasonality_amplitude = seasonality_amplitude
         self.mean_reversion_strength = mean_reversion_strength
         self.momentum_factor = momentum_factor
         self.jump_intensity = jump_intensity
@@ -106,13 +78,8 @@ class OHLCVGenerator:
         self.bid_ask_spread = bid_ask_spread
         self.tick_size = tick_size
         self.market_impact = market_impact
+        self.ticks_per_day = ticks_per_day
         
-        # Default intraday volatility pattern (U-shaped)
-        if intraday_volatility_pattern is None:
-            self.intraday_volatility_pattern = self._default_intraday_pattern()
-        else:
-            self.intraday_volatility_pattern = intraday_volatility_pattern
-            
         # Set regime-specific parameters
         self._set_regime_parameters()
         
@@ -121,17 +88,10 @@ class OHLCVGenerator:
         
         # Initialize state variables
         self.current_volatility = self.base_volatility
+        self.current_spread = self.bid_ask_spread
         
         # Store the most recently generated data
-        self.data = None
-        self.last_params = {}
-    
-    def _default_intraday_pattern(self) -> List[float]:
-        """Generate default U-shaped intraday volatility pattern."""
-        hours = np.arange(24)
-        pattern = 1 + 0.5 * (np.exp(-((hours - 9.5) ** 2) / 20) + 
-                            np.exp(-((hours - 15.5) ** 2) / 20))
-        return pattern.tolist()
+        self.tick_data = None
     
     def _set_regime_parameters(self):
         """Set drift and volatility adjustments based on market regime."""
@@ -163,13 +123,13 @@ class OHLCVGenerator:
         else:  # SIDEWAYS
             self.drift_adjustment = 0.0
             self.volatility_adjustment = 1.0
-            
+    
     def _set_asset_parameters(self):
         """Set parameters specific to asset class."""
         if self.asset_class == AssetClass.CRYPTO:
             self.base_volatility *= 3.0
             self.gap_probability *= 2.0
-            self.volume_std *= 2.0
+            self.tick_volume_std *= 2.0
             self.jump_intensity *= 3.0
             self.bid_ask_spread *= 2.0
         elif self.asset_class == AssetClass.FOREX:
@@ -179,11 +139,10 @@ class OHLCVGenerator:
             self.tick_size = 0.0001  # 1 pip for major pairs
         elif self.asset_class == AssetClass.COMMODITY:
             self.base_volatility *= 1.5
-            self.seasonality_amplitude *= 2.0
             self.mean_reversion_strength *= 1.5
         elif self.asset_class == AssetClass.ETF:
             self.base_volatility *= 0.8
-            self.volume_std *= 1.5
+            self.tick_volume_std *= 1.5
             self.market_impact *= 0.5
         elif self.asset_class == AssetClass.BOND:
             self.base_volatility *= 0.3
@@ -193,7 +152,7 @@ class OHLCVGenerator:
             self.base_volatility *= 0.7
             self.momentum_factor *= 1.5
             self.correlation_decay *= 1.2
-            
+    
     def _update_volatility(self, last_return: float) -> float:
         """Update volatility using GARCH-like dynamics."""
         target_vol = self.base_volatility * (1 + 5 * abs(last_return))
@@ -201,228 +160,207 @@ class OHLCVGenerator:
                                  (1 - self.volatility_clustering) * target_vol)
         return self.current_volatility * self.volatility_adjustment
     
-    def _apply_seasonality(self, dates: pd.DatetimeIndex, values: np.ndarray) -> np.ndarray:
-        """Apply seasonal patterns to the data."""
-        if self.seasonality_amplitude > 0:
-            seasonal_factor = 1 + self.seasonality_amplitude * np.sin(2 * np.pi * 
-                (dates.dayofyear / 365.25 + dates.hour / 24))
-            return values * seasonal_factor
-        return values
-    
-    def _generate_prices(self, 
-                        start_price: float,
-                        periods: int,
-                        dates: pd.DatetimeIndex) -> Dict[str, np.ndarray]:
-        """Generate daily OHLC prices using enhanced model."""
+    def _generate_tick_prices(self, 
+                            start_price: float,
+                            num_ticks: int,
+                            dates: pd.DatetimeIndex) -> Dict[str, np.ndarray]:
+        """Generate tick-by-tick price data with microstructure effects."""
         # Initialize arrays
-        returns = np.zeros(periods)
-        close_prices = np.zeros(periods)
-        open_prices = np.zeros(periods)
-        high_prices = np.zeros(periods)
-        low_prices = np.zeros(periods)
+        mid_prices = np.zeros(num_ticks)
+        bid_prices = np.zeros(num_ticks)
+        ask_prices = np.zeros(num_ticks)
+        spreads = np.zeros(num_ticks)
+        volumes = np.zeros(num_ticks)
         
         # Set initial prices
-        close_prices[0] = start_price
-        open_prices[0] = start_price
+        mid_prices[0] = start_price
+        spreads[0] = self.current_spread * start_price
+        bid_prices[0] = start_price - spreads[0]/2
+        ask_prices[0] = start_price + spreads[0]/2
         
-        # Generate initial candle
-        intraday_vol = self.base_volatility / np.sqrt(4)
-        high_prices[0] = open_prices[0] * (1 + abs(np.random.normal(0, intraday_vol)))
-        low_prices[0] = open_prices[0] * (1 - abs(np.random.normal(0, intraday_vol)))
-        
-        # Generate price series with volatility clustering and gaps
-        for i in range(1, periods):
-            # Add potential gap
-            gap = 0
-            if np.random.random() < self.gap_probability:
-                gap = np.random.uniform(-self.max_gap_size, self.max_gap_size)
+        # Generate tick-by-tick data
+        for i in tqdm(range(1, num_ticks), desc="Generating tick data"):
+            # Update volatility with bounds
+            returns = (mid_prices[i-1] - mid_prices[max(0, i-2)]) / mid_prices[max(0, i-2)]
+            returns = np.clip(returns, -0.005, 0.005)
+            tick_vol = self._update_volatility(returns)
+            tick_vol = min(tick_vol, 0.005)
             
-            # Generate return with current volatility
-            volatility = self._update_volatility(returns[i-1])
-            returns[i] = np.random.normal(
-                self.base_drift * self.drift_adjustment,
-                volatility
-            ) + gap
+            # Generate price innovation with mean reversion and momentum
+            price_change = np.random.normal(
+                self.base_drift * self.drift_adjustment / self.ticks_per_day,
+                tick_vol / np.sqrt(self.ticks_per_day)
+            )
             
-            # Calculate close price
-            close_prices[i] = close_prices[i-1] * np.exp(returns[i])
+            # Add mean reversion
+            if i > 10:  # Need at least 10 points for mean reversion
+                window = mid_prices[i-10:i]
+                returns = np.diff(window) / window[:-1]
+                returns = np.clip(returns, -0.005, 0.005)
+                cumulative_return = np.sum(returns)
+                mean_reversion = -self.mean_reversion_strength * cumulative_return
+                mean_reversion = np.clip(mean_reversion, -0.001, 0.001)
+                price_change += mean_reversion
             
-            # Set open price to previous close (with small possible gap)
-            if gap != 0:
-                open_prices[i] = close_prices[i-1] * np.exp(gap)
-            else:
-                open_prices[i] = close_prices[i-1]
+            # Add momentum
+            if i > 10:  # Need at least 10 points for momentum
+                recent_return = (mid_prices[i-1] - mid_prices[i-10]) / mid_prices[i-10]
+                recent_return = np.clip(recent_return, -0.005, 0.005)
+                momentum = self.momentum_factor * recent_return
+                momentum = np.clip(momentum, -0.001, 0.001)
+                price_change += momentum
             
-            # Generate high and low with respect to open and close
-            price_range = volatility * np.random.uniform(0.5, 1.5)
-            if close_prices[i] > open_prices[i]:
-                high_prices[i] = close_prices[i] * (1 + abs(np.random.normal(0, price_range)))
-                low_prices[i] = open_prices[i] * (1 - abs(np.random.normal(0, price_range)))
-            else:
-                high_prices[i] = open_prices[i] * (1 + abs(np.random.normal(0, price_range)))
-                low_prices[i] = close_prices[i] * (1 - abs(np.random.normal(0, price_range)))
+            # Add jumps
+            if np.random.random() < self.jump_intensity / self.ticks_per_day:
+                jump = np.random.normal(self.jump_size_mean, self.jump_size_std)
+                jump = np.clip(jump, -0.005, 0.005)
+                price_change += jump
             
-            # Ensure high is highest and low is lowest
-            high_prices[i] = max(high_prices[i], open_prices[i], close_prices[i])
-            low_prices[i] = min(low_prices[i], open_prices[i], close_prices[i])
-        
-        # Apply seasonality
-        close_prices = self._apply_seasonality(dates, close_prices)
-        open_prices = self._apply_seasonality(dates, open_prices)
-        high_prices = self._apply_seasonality(dates, high_prices)
-        low_prices = self._apply_seasonality(dates, low_prices)
+            # Limit total price change
+            price_change = np.clip(price_change, -0.005, 0.005)
+            
+            # Update mid price
+            mid_prices[i] = mid_prices[i-1] * (1 + price_change)
+            
+            # Ensure price doesn't go too low
+            mid_prices[i] = max(mid_prices[i], 0.01)
+            
+            # Update spread based on volatility and volume
+            self.current_spread = np.clip(
+                max(self.bid_ask_spread, self.bid_ask_spread * (1 + 5 * tick_vol)),
+                0.00001,
+                0.001
+            )
+            spreads[i] = self.current_spread * mid_prices[i]
+            
+            # Calculate bid/ask prices
+            bid_prices[i] = mid_prices[i] - spreads[i]/2
+            ask_prices[i] = mid_prices[i] + spreads[i]/2
+            
+            # Round to tick size if specified
+            if self.tick_size is not None:
+                bid_prices[i] = np.round(bid_prices[i] / self.tick_size) * self.tick_size
+                ask_prices[i] = np.round(ask_prices[i] / self.tick_size) * self.tick_size
+                mid_prices[i] = (bid_prices[i] + ask_prices[i]) / 2
+            
+            # Generate volume for this tick (ensure it's positive)
+            vol_multiplier = max(1 + 3 * abs(price_change), 0.1)
+            volumes[i] = max(1, int(np.random.normal(
+                self.tick_volume_mean, 
+                self.tick_volume_std * vol_multiplier
+            )))
         
         return {
-            'open': open_prices,
-            'high': high_prices,
-            'low': low_prices,
-            'close': close_prices,
-            'returns': returns
+            'datetime': dates,
+            'mid': mid_prices,
+            'bid': bid_prices,
+            'ask': ask_prices,
+            'spread': spreads,
+            'volume': volumes.astype(int)
         }
     
-    def _generate_volume(self, periods: int, returns: np.ndarray) -> np.ndarray:
-        """Generate trading volume data with price-volume correlation."""
-        # Base volume
-        volume = np.maximum(
-            np.random.normal(self.volume_mean, 
-                           self.volume_std, 
-                           size=periods),
-            self.volume_mean * 0.1
-        )
+    def _aggregate_to_ohlcv(self, tick_data: pd.DataFrame, freq: str) -> pd.DataFrame:
+        """Aggregate tick data to OHLCV format at specified frequency."""
+        # Resample to desired frequency without filling gaps
+        ohlc = tick_data.groupby(pd.Grouper(key='datetime', freq=freq, label='left')).agg({
+            'mid': ['first', 'max', 'min', 'last'],
+            'volume': 'sum'
+        }).dropna()  # Remove any NaN rows
         
-        # Add correlation with absolute returns
-        if self.volume_price_corr > 0:
-            abs_returns = np.abs(returns)
-            volume = volume * (1 + self.volume_price_corr * 
-                             (abs_returns - np.mean(abs_returns)) / np.std(abs_returns))
-            
-        return np.maximum(volume, self.volume_mean * 0.1).astype(int)
+        # Flatten column names
+        ohlc.columns = ['open', 'high', 'low', 'close', 'volume']
+        
+        return ohlc.reset_index()
     
-    def get_params_string(self) -> str:
-        """Get a formatted string of current parameters."""
-        params = [
-            f"Regime: {self.regime.value}",
-            f"Asset: {self.asset_class.value}",
-            f"Market: {self.market_hours.value}",
-            f"Base Vol: {self.base_volatility:.3f}",
-            f"Drift: {self.base_drift*self.drift_adjustment:.3f}",
-            f"Vol Cluster: {self.volatility_clustering:.1f}",
-            f"Gap Prob: {self.gap_probability:.2f}",
-            f"Momentum: {self.momentum_factor:.2f}",
-            f"Mean Rev: {self.mean_reversion_strength:.2f}",
-            f"Jump Int: {self.jump_intensity:.2f}"
-        ]
-        return "\n".join(params)
-
     def generate(self,
-                periods: int = 252,  
+                days: int = 1,
                 start_date: Optional[Union[str, datetime]] = None,
                 start_price: float = 100.0,
-                frequency: str = 'D',  
-                symbol: str = 'SAMPLE') -> pd.DataFrame:
+                symbol: str = 'APPL') -> pd.DataFrame:
         """
-        Generate OHLCV data with enhanced features.
+        Generate tick data for the specified number of days.
         
         Args:
-            periods: Number of periods to generate
+            days: Number of days to generate
             start_date: Starting date (defaults to today if None)
             start_price: Initial price
-            frequency: Time series frequency ('D' for daily, 'H' for hourly, 'min' for minutes)
             symbol: Stock symbol or identifier
             
         Returns:
-            DataFrame with OHLCV data
+            DataFrame with tick data
         """
-        # Store generation parameters
-        self.last_params = {
-            'periods': periods,
-            'start_date': start_date,
-            'start_price': start_price,
-            'frequency': frequency,
-            'symbol': symbol
-        }
-        
         # Handle start date
         if start_date is None:
             start_date = datetime.now()
         elif isinstance(start_date, str):
             start_date = pd.to_datetime(start_date)
-            
-        # Generate date range based on frequency
-        if frequency == 'D':
-            dates = pd.date_range(start=start_date, 
-                                periods=periods, 
-                                freq='B')  # Business days
-        elif frequency == 'H':
-            dates = pd.date_range(start=start_date,
-                                periods=periods,
-                                freq='H')
-        elif frequency.endswith('min'):
-            try:
-                minutes = int(frequency[:-3])  # Extract number from '5min', '15min', etc.
-                dates = pd.date_range(start=start_date,
-                                    periods=periods,
-                                    freq=f'{minutes}min')
-            except ValueError:
-                raise ValueError(f"Invalid minute frequency format: {frequency}. Use format like '5min', '15min', etc.")
-        else:
-            raise ValueError(f"Unsupported frequency: {frequency}. Use 'D', 'H', or '[number]min'")
-            
-        # Scale volatility and drift based on frequency
-        if frequency != 'D':
-            # Get number of periods per day
-            if frequency == 'H':
-                periods_per_day = 24
-            else:
-                minutes = int(frequency[:-3])
-                periods_per_day = 24 * 60 // minutes
-                
-            # Scale parameters
-            vol_scale = 1 / np.sqrt(periods_per_day)
-            drift_scale = 1 / periods_per_day
-            
-            orig_vol = self.base_volatility
-            orig_drift = self.base_drift
-            
-            self.base_volatility *= vol_scale
-            self.base_drift *= drift_scale
-            
-        # Generate OHLCV data
-        prices = self._generate_prices(start_price, periods, dates)
-        volume = self._generate_volume(periods, prices['returns'])
         
-        # Restore original parameters if they were scaled
-        if frequency != 'D':
-            self.base_volatility = orig_vol
-            self.base_drift = orig_drift
+        # Calculate total number of ticks
+        num_ticks = int(days * self.ticks_per_day)
+        
+        # Generate timestamps based on market hours and volume patterns
+        all_timestamps = []
+        current_date = start_date
+        
+        for _ in range(days):
+            # US Market hours: 9:30 AM - 4:00 PM EST
+            market_open = pd.Timestamp(current_date).replace(hour=9, minute=30)
+            market_close = pd.Timestamp(current_date).replace(hour=16, minute=0)
+            
+            # Create base timestamps for the day
+            day_timestamps = pd.date_range(market_open, market_close, periods=self.ticks_per_day//days)
+            
+            # Create volume profile (U-shaped pattern)
+            time_of_day = (day_timestamps - market_open).total_seconds() / (market_close - market_open).total_seconds()
+            volume_profile = 1 + 2 * (1 - 4 * (time_of_day - 0.5)**2)  # U-shaped curve
+            
+            # Add some randomness to volume profile
+            volume_profile *= np.random.normal(1, 0.2, len(volume_profile))
+            volume_profile = np.clip(volume_profile, 0.1, 3)  # Limit the range
+            
+            # Adjust timestamp density based on volume profile
+            time_deltas = np.random.exponential(1/volume_profile)
+            time_deltas = time_deltas / np.sum(time_deltas) * (market_close - market_open).total_seconds()
+            day_timestamps = pd.to_datetime(market_open.value + (time_deltas.cumsum() * 1e9).astype(np.int64))
+            
+            # Filter out timestamps after market close
+            day_timestamps = day_timestamps[day_timestamps <= market_close]
+            
+            all_timestamps.extend(day_timestamps)
+            current_date += pd.Timedelta(days=1)
+            
+            # Skip weekends
+            while current_date.weekday() > 4:  # 5 = Saturday, 6 = Sunday
+                current_date += pd.Timedelta(days=1)
+        
+        timestamps = pd.DatetimeIndex(all_timestamps)
+        num_ticks = len(timestamps)
+        
+        # Generate tick data
+        tick_data = self._generate_tick_prices(start_price, num_ticks, timestamps)
         
         # Create DataFrame
-        df = pd.DataFrame({
-            'symbol': symbol,
-            'datetime': dates,
-            'open': prices['open'],
-            'high': prices['high'],
-            'low': prices['low'],
-            'close': prices['close'],
-            'volume': volume
-        })
+        self.tick_data = pd.DataFrame(tick_data)
         
-        # Store the generated data
-        self.data = df.set_index(['datetime', 'symbol'])
-        
-        return self.data
-
-    def save(self, filename: str, directory: str = "output") -> None:
-        """Save the most recently generated data to a CSV file.
+        return self.tick_data
+    
+    def save(self, 
+             filename: str, 
+             directory: str = "output",
+             freq: Optional[str] = None) -> None:
+        """
+        Save the generated data to a CSV file.
         
         Args:
             filename: Name of the file (without .csv extension)
             directory: Directory to save the file in (default: "output")
+            freq: Frequency to aggregate data to (e.g., '1min', '5min', '1H', '1D')
+                 If None, saves raw tick data
         
         Raises:
             ValueError: If no data has been generated yet
         """
-        if self.data is None:
+        if self.tick_data is None:
             raise ValueError("No data has been generated yet. Call generate() first.")
         
         # Create the output directory if it doesn't exist
@@ -430,12 +368,14 @@ class OHLCVGenerator:
         os.makedirs(directory, exist_ok=True)
         
         # Prepare the data for saving
-        data_to_save = self.data.copy()
-        data_to_save.index = data_to_save.index.get_level_values(0)  # Get datetime from MultiIndex
-        data_to_save = data_to_save.reset_index()
-        data_to_save.rename(columns={'index': 'datetime'}, inplace=True)
+        if freq is not None:
+            # Aggregate to specified frequency
+            data_to_save = self._aggregate_to_ohlcv(self.tick_data, freq)
+        else:
+            # Save raw tick data
+            data_to_save = self.tick_data.copy()
         
         # Save to CSV
-        filepath = os.path.join(directory, f"{filename}")
-        data_to_save[['datetime', 'open', 'high', 'low', 'close', 'volume']].to_csv(filepath, index=False)
+        filepath = os.path.join(directory, f"{filename}.csv")
+        data_to_save.to_csv(filepath, index=False)
         print(f"Data saved to {filepath}")
